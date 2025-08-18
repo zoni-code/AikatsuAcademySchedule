@@ -55,21 +55,26 @@ def fetch_schedule():
                 # 絵文字 prefix
                 prefixes = []
                 urls = []
-                if "みえる" in title:
-                    prefixes.append("💌")
-                    urls.append("https://www.youtube.com/@himeno-mieru")
-                if "メエ" in title:
-                    prefixes.append("🐑")
-                    urls.append("https://www.youtube.com/@mamimu-meh")
-                if "パリン" in title:
-                    prefixes.append("🐣")
-                    urls.append("https://www.youtube.com/@wao-parin")
-                if "たいむ" in title:
-                    prefixes.append("🐩")
-                    urls.append("https://www.youtube.com/@rindou-taimu")
-                if "アイカツアカデミー！配信部" in title:
-                    prefixes.append("🏫")
-                    urls.append("https://www.youtube.com/@aikatsu-academy")
+
+                candidates = [
+                    ("みえる", "💌", "https://www.youtube.com/@himeno-mieru"),
+                    ("メエ", "🐑", "https://www.youtube.com/@mamimu-meh"),
+                    ("パリン", "🐣", "https://www.youtube.com/@wao-parin"),
+                    ("たいむ", "🐩", "https://www.youtube.com/@rindou-taimu"),
+                    ("アイカツアカデミー！配信部", "🏫", "https://www.youtube.com/@aikatsu-academy"),
+                ]
+
+                matches = []
+                for word, prefix, url in candidates:
+                    pos = title.find(word)
+                    if pos != -1:
+                        matches.append((pos, prefix, url))
+
+                # title に出現する順にソート
+                matches.sort(key=lambda x: x[0])
+
+                prefixes = [m[1] for m in matches]
+                urls = [m[2] for m in matches]
                 prefix = "".join(prefixes)
 
                 # category 表現変換
