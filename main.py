@@ -122,29 +122,17 @@ def print_schedule(events):
             "description": " ".join(event["urls"]),
         }, ensure_ascii=False))
 
-# Googleカレンダーに登録（今月の既存イベントは削除）
-def add_to_calendar(events):
-    if not events:
-        print("No events to add.")
-        return
+# Googleカレンダーに登録
 
-    credentials = service_account.Credentials.from_service_account_file(
-        "service_account.json",
-        scopes=["https://www.googleapis.com/auth/calendar"]
-    )
-    calendar_id = os.environ.get("CALENDAR_ID")
-    service = build("calendar", "v3", credentials=credentials)
-
-    # 3ヶ月分の期間をカバー
+def diff_events(service, calendar_id, events):
+    # 期間決定
     start_date = min(e["start"] for e in events).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     latest_event = max(e["start"] for e in events)
     month_after_next = (latest_event.replace(day=1) + timedelta(days=62)).replace(day=1)
     end_date = month_after_next
 
-    print(f"Fetching existing events from {start_date} to {end_date}...")
     existing_events = []
     page_token = None
-
     while True:
         response = service.events().list(
             calendarId=calendar_id,
@@ -159,43 +147,90 @@ def add_to_calendar(events):
         if not page_token:
             break
 
-    # 重複しないイベントだけを抽出
-    def is_duplicate(new_event):
-        for existing in existing_events:
-            try:
-                existing_start = parse_naive_dt(existing["start"]["dateTime"])
-                existing_end = parse_naive_dt(existing["end"]["dateTime"])
-            except (KeyError, ValueError):
-                continue
+    # 辞書化（タイトル→イベント一覧）
+    existing_map = {}
+    for ex in existing_events:
+        title = ex.get("summary", "")
+        existing_map.setdefault(title, []).append(ex)
 
-            new_start = new_event["start"].replace(tzinfo=None)
-            new_end = new_event["end"].replace(tzinfo=None)
+    to_add = []
+    to_update = []
+    unchanged = []
 
-            trim_existing_title = existing.get("summary")
-            trim_existing_title.replace('\u200b', ' ')
-            trim_existing_title.replace('\u3000', ' ')
+    for ev in events:
+        new_start = ev["start"].replace(tzinfo=None)
+        new_end = ev["end"].replace(tzinfo=None)
+        matches = existing_map.get(ev["summary"], [])
 
-            if (
-                    trim_existing_title == new_event["summary"] and
-                    existing_start == new_start and
-                    existing_end == new_end
-            ):
-                return True
-        return False
+        if matches:
+            matched = False
+            for ex in matches:
+                try:
+                    ex_start = parse_naive_dt(ex["start"]["dateTime"])
+                    ex_end = parse_naive_dt(ex["end"]["dateTime"])
+                except (KeyError, ValueError):
+                    continue
+                if ex_start == new_start and ex_end == new_end:
+                    matched = True
+                    unchanged.append(ev)
+                    break
+            if not matched:
+                to_update.append(ev)
+        else:
+            to_add.append(ev)
 
-    # 新しいイベントだけ追加
-    new_events = [e for e in events if not is_duplicate(e)]
-    print(f"{len(new_events)} new events to insert...")
+    return to_add, to_update, unchanged
 
-    for event in new_events:
+def add_to_calendar(events, dry=False):
+    if not events:
+        print("No events to add.")
+        return
+
+    credentials = service_account.Credentials.from_service_account_file(
+        "service_account.json",
+        scopes=["https://www.googleapis.com/auth/calendar"]
+    )
+    calendar_id = os.environ.get("CALENDAR_ID")
+    service = build("calendar", "v3", credentials=credentials)
+
+    to_add, to_update, unchanged = diff_events(service, calendar_id, events)
+
+    if dry:
+        print("=== Dry Run Result ===")
+        for e in to_add:
+            print("[ADD]", e["summary"], e["start"].isoformat())
+        for e in to_update:
+            print("[UPDATE]", e["summary"], e["start"].isoformat())
+        for e in unchanged:
+            print("[SKIP]", e["summary"], e["start"].isoformat())
+        return
+
+    # 追加
+    for ev in to_add:
         body = {
-            "summary": event["summary"],
-            "description": " ".join(event["urls"]),
-            "start": {"dateTime": event["start"].isoformat(), "timeZone": "Asia/Tokyo"},
-            "end": {"dateTime": event["end"].isoformat(), "timeZone": "Asia/Tokyo"},
+            "summary": ev["summary"],
+            "description": " ".join(ev["urls"]),
+            "start": {"dateTime": ev["start"].isoformat(), "timeZone": "Asia/Tokyo"},
+            "end": {"dateTime": ev["end"].isoformat(), "timeZone": "Asia/Tokyo"},
         }
         service.events().insert(calendarId=calendar_id, body=body).execute()
-        print(f"Added: {event['summary']}")
+        print(f"Added: {ev['summary']}")
+
+    # 更新（削除→追加）
+    for ev in to_update:
+        # 既存削除
+        for ex in service.events().list(calendarId=calendar_id).execute().get("items", []):
+            if ex.get("summary") == ev["summary"]:
+                service.events().delete(calendarId=calendar_id, eventId=ex["id"]).execute()
+        # 新規追加
+        body = {
+            "summary": ev["summary"],
+            "description": " ".join(ev["urls"]),
+            "start": {"dateTime": ev["start"].isoformat(), "timeZone": "Asia/Tokyo"},
+            "end": {"dateTime": ev["end"].isoformat(), "timeZone": "Asia/Tokyo"},
+        }
+        service.events().insert(calendarId=calendar_id, body=body).execute()
+        print(f"Updated: {ev['summary']}")
 
 # Cloud Functions/ローカル両対応のエントリポイント
 def main(request=None):
@@ -208,11 +243,11 @@ def main(request=None):
     mode = os.environ.get("MODE", "").lower()
 
     if mode == "dry":
-        print_schedule(events)
-        return "Printed schedule (dry run)"
+        add_to_calendar(events, dry=True)
+        return "Dry run completed"
     else:
-        add_to_calendar(events)
-        return "Added schedule to calendar"
+        add_to_calendar(events, dry=False)
+        return "Added/Updated schedule"
 
 # ローカル実行用
 if __name__ == "__main__":
