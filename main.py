@@ -184,7 +184,7 @@ def diff_events(service, calendar_id, events):
         else:
             to_add.append(ev)
 
-    return to_add, to_update, unchanged
+    return to_add, to_update, unchanged, existing_events
 
 def add_to_calendar(events, dry=False):
     if not events:
@@ -198,7 +198,12 @@ def add_to_calendar(events, dry=False):
     calendar_id = os.environ.get("CALENDAR_ID")
     service = build("calendar", "v3", credentials=credentials)
 
-    to_add, to_update, unchanged = diff_events(service, calendar_id, events)
+    to_add, to_update, unchanged, existing_events = diff_events(service, calendar_id, events)
+
+    existing_map = {}
+    for ex in existing_events:
+        title = ex.get("summary", "")
+        existing_map.setdefault(title, []).append(ex)
 
     if dry:
         print("=== Dry Run Result ===")
@@ -224,10 +229,9 @@ def add_to_calendar(events, dry=False):
     # 更新（削除→追加）
     for ev in to_update:
         # 既存削除
-        for ex in service.events().list(calendarId=calendar_id).execute().get("items", []):
-            if ex.get("summary") == ev["summary"]:
-                service.events().delete(calendarId=calendar_id, eventId=ex["id"]).execute()
-                print(f"Deleted old: {ev['summary']}")
+        for ex in existing_map.get(ev["summary"], []):
+            service.events().delete(calendarId=calendar_id, eventId=ex["id"]).execute()
+            print(f"Deleted old: {ev['summary']}")
         # 新規追加
         body = {
             "summary": ev["summary"],
