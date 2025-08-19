@@ -227,6 +227,7 @@ def add_to_calendar(events, dry=False):
         for ex in service.events().list(calendarId=calendar_id).execute().get("items", []):
             if ex.get("summary") == ev["summary"]:
                 service.events().delete(calendarId=calendar_id, eventId=ex["id"]).execute()
+                print(f"Deleted old: {ev['summary']}")
         # 新規追加
         body = {
             "summary": ev["summary"],
