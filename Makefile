@@ -18,7 +18,7 @@ deploy:
 
 schedule:
 	gcloud scheduler jobs update http aikatsu-schedule-job \
-		--schedule "0 1 * * *" \
+		--schedule "0 0 * * *" \
 		--time-zone "Asia/Tokyo" \
 		--http-method GET \
 		--uri "https://us-central1-academycalendar-460009.cloudfunctions.net/aikatsu_calendar_update" \
