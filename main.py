@@ -153,7 +153,7 @@ def diff_events(service, calendar_id, events):
         if not page_token:
             break
 
-    # 辞書化（タイトル→イベント一覧）
+    # dict(summary -> events)
     existing_map = {}
     for ex in existing_events:
         title = ex.get("summary", "")
@@ -162,7 +162,9 @@ def diff_events(service, calendar_id, events):
     to_add = []
     to_update = []
     unchanged = []
+    to_delete = []
 
+    # 今回のイベントをマッチング
     for ev in events:
         new_start = ev["start"].replace(tzinfo=None)
         new_end = ev["end"].replace(tzinfo=None)
@@ -185,7 +187,21 @@ def diff_events(service, calendar_id, events):
         else:
             to_add.append(ev)
 
-    return to_add, to_update, unchanged, existing_events
+    # === 削除対象判定 ===
+    # 今回の events の (summary, start, end) のセット
+    current_keys = set((ev["summary"], ev["start"], ev["end"]) for ev in events)
+
+    for ex in existing_events:
+        try:
+            ex_start = parse_naive_dt(ex["start"]["dateTime"])
+            ex_end = parse_naive_dt(ex["end"]["dateTime"])
+        except (KeyError, ValueError):
+            continue
+        key = (ex.get("summary", ""), ex_start, ex_end)
+        if key not in current_keys:
+            to_delete.append(ex)
+
+    return to_add, to_update, unchanged, to_delete, existing_events
 
 def add_to_calendar(events, dry=False):
     if not events:
@@ -199,12 +215,7 @@ def add_to_calendar(events, dry=False):
     calendar_id = os.environ.get("CALENDAR_ID")
     service = build("calendar", "v3", credentials=credentials)
 
-    to_add, to_update, unchanged, existing_events = diff_events(service, calendar_id, events)
-
-    existing_map = {}
-    for ex in existing_events:
-        title = ex.get("summary", "")
-        existing_map.setdefault(title, []).append(ex)
+    to_add, to_update, unchanged, to_delete, existing_events = diff_events(service, calendar_id, events)
 
     if dry:
         print("=== Dry Run Result ===")
@@ -214,7 +225,14 @@ def add_to_calendar(events, dry=False):
             print("[UPDATE]", e["summary"], e["start"].isoformat())
         for e in unchanged:
             print("[SKIP]", e["summary"], e["start"].isoformat())
+        for ex in to_delete:
+            print("[DELETE]", ex.get("summary", ""), ex["start"]["dateTime"])
         return
+
+    existing_map = {}
+    for ex in existing_events:
+        title = ex.get("summary", "")
+        existing_map.setdefault(title, []).append(ex)
 
     # 追加
     for ev in to_add:
@@ -242,6 +260,11 @@ def add_to_calendar(events, dry=False):
         }
         service.events().insert(calendarId=calendar_id, body=body).execute()
         print(f"Updated: {ev['summary']}")
+
+    # 削除
+    for ex in to_delete:
+        service.events().delete(calendarId=calendar_id, eventId=ex["id"]).execute()
+        print(f"Deleted obsolete: {ex.get('summary', '')}")
 
 # Cloud Functions/ローカル両対応のエントリポイント
 def main(request=None):
