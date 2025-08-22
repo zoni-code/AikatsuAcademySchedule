@@ -34,10 +34,8 @@ def fetch_schedule():
             day = int(day_match.group(0))
 
             for post_item in item.select(".post__item"):
-                category_element = post_item.select_one(".cat")
-                if not category_element:
-                    continue
-                category = category_element.get_text(strip=True)
+                category_elements = post_item.select(".cat")
+                categories = [c.get_text(strip=True) for c in category_elements]
                 p = post_item.select_one("p")
                 full_text = p.get_text(strip=True)
                 time_match = re.match(r"(\d{1,2}:\d{2})〜\s*(.+)", full_text)
@@ -78,22 +76,25 @@ def fetch_schedule():
                 prefix = "".join(prefixes)
 
                 # category 表現変換
-                if "YouTube" in category:
-                    category_text = ""
-                elif "メンバーシップ" in category:
-                    category_text = "🔒"
-                elif "グッズ" in category:
-                    category_text = "🛍️"
-                elif "カード" in category:
-                    category_text = "🎴"
-                elif "ミュージック" in category:
-                    category_text = "🎵"
-                elif "スペシャル" in category:
-                    category_text = "✨"
-                elif "short" in category.lower():
-                    category_text = "📎"
-                else:
-                    category_text = category
+                category_texts = []
+                for category in categories:
+                    if "YouTube" in category:
+                        continue
+                    elif "メンバーシップ" in category:
+                        category_texts.append("🔒")
+                    elif "グッズ" in category:
+                        category_texts.append("🛍️")
+                    elif "カード" in category:
+                        category_texts.append("🎴")
+                    elif "ミュージック" in category:
+                        category_texts.append("🎵")
+                    elif "スペシャル" in category:
+                        category_texts.append("✨")
+                    elif "short" in category.lower():
+                        category_texts.append("📎")
+                    else:
+                        category_texts.append(category)
+                category_text = "".join(category_texts)
 
                 # title クレンジング
                 title = re.sub(r"\[.*?個人配信\]", "", title)
