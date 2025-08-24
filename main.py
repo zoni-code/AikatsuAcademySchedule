@@ -153,11 +153,17 @@ def diff_events(service, calendar_id, events):
         if not page_token:
             break
 
-    # dict(summary -> events)
+    # dict((summary, date) -> events)
     existing_map = {}
     for ex in existing_events:
         title = ex.get("summary", "")
-        existing_map.setdefault(title, []).append(ex)
+        try:
+            ex_start = parse_naive_dt(ex["start"]["dateTime"])
+        except (KeyError, ValueError):
+            continue
+        # 日付単位でマッピング
+        key = (title, ex_start.date())
+        existing_map.setdefault(key, []).append(ex)
 
     to_add = []
     to_update = []
@@ -168,7 +174,7 @@ def diff_events(service, calendar_id, events):
     for ev in events:
         new_start = ev["start"].replace(tzinfo=None)
         new_end = ev["end"].replace(tzinfo=None)
-        matches = existing_map.get(ev["summary"], [])
+        matches = existing_map.get((ev["summary"], new_start.date()), [])
 
         if matches:
             matched = False
