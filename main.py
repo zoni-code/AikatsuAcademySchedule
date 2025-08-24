@@ -153,17 +153,11 @@ def diff_events(service, calendar_id, events):
         if not page_token:
             break
 
-    # dict((summary, date) -> events)
+    # dict(summary -> events)
     existing_map = {}
     for ex in existing_events:
         title = ex.get("summary", "")
-        try:
-            ex_start = parse_naive_dt(ex["start"]["dateTime"])
-        except (KeyError, ValueError):
-            continue
-        # 日付単位でマッピング
-        key = (title, ex_start.date())
-        existing_map.setdefault(key, []).append(ex)
+        existing_map.setdefault(title, []).append(ex)
 
     to_add = []
     to_update = []
@@ -176,6 +170,8 @@ def diff_events(service, calendar_id, events):
         new_end = ev["end"].replace(tzinfo=None)
         matches = existing_map.get((ev["summary"], new_start.date()), [])
 
+        matches = existing_map.get(ev["summary"], [])
+
         if matches:
             matched = False
             for ex in matches:
@@ -184,13 +180,24 @@ def diff_events(service, calendar_id, events):
                     ex_end = parse_naive_dt(ex["end"]["dateTime"])
                 except (KeyError, ValueError):
                     continue
+
+                # 完全一致なら unchanged
                 if ex_start == new_start and ex_end == new_end:
                     matched = True
                     unchanged.append(ev)
                     break
+
+                # 24時間以内の差なら update 扱い
+                if abs((new_start - ex_start).total_seconds()) <= 6 * 3600:
+                    to_update.append(ev)
+                    matched = True
+                    break
+
             if not matched:
-                to_update.append(ev)
+                # 既存はあるけど時刻が大きく違う → add 扱い
+                to_add.append(ev)
         else:
+            # summary が全くない → add
             to_add.append(ev)
 
     # === 削除対象判定 ===
