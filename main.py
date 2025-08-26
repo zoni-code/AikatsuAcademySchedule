@@ -259,11 +259,6 @@ def add_to_calendar(events, dry=False):
         # 更新
         for ev in to_update:
             for ex in existing_map.get(ev["summary"], []):
-                try:
-                    ex_start = parse_naive_dt(ex["start"]["dateTime"])
-                except (KeyError, ValueError):
-                    continue
-
                 # 6時間以内の差のはずなのでそのまま update
                 body = {
                     "summary": ev["summary"],
