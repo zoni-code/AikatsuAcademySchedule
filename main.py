@@ -168,8 +168,6 @@ def diff_events(service, calendar_id, events):
     for ev in events:
         new_start = ev["start"].replace(tzinfo=None)
         new_end = ev["end"].replace(tzinfo=None)
-        matches = existing_map.get((ev["summary"], new_start.date()), [])
-
         matches = existing_map.get(ev["summary"], [])
 
         if matches:
@@ -187,7 +185,7 @@ def diff_events(service, calendar_id, events):
                     unchanged.append(ev)
                     break
 
-                # 24時間以内の差なら update 扱い
+                # 6時間以内の差なら update 扱い
                 if abs((new_start - ex_start).total_seconds()) <= 6 * 3600:
                     to_update.append(ev)
                     matched = True
@@ -258,22 +256,24 @@ def add_to_calendar(events, dry=False):
         service.events().insert(calendarId=calendar_id, body=body).execute()
         print(f"Added: {ev['summary']}")
 
-    # 更新（削除→追加）
-    for ev in to_update:
-        # 既存削除
-        for ex in existing_map.get(ev["summary"], []):
-            service.events().delete(calendarId=calendar_id, eventId=ex["id"]).execute()
-            print(f"Deleted old: {ev['summary']}")
-        # 新規追加
-        body = {
-            "summary": ev["summary"],
-            "description": " ".join(ev["urls"]),
-            "start": {"dateTime": ev["start"].isoformat(), "timeZone": "Asia/Tokyo"},
-            "end": {"dateTime": ev["end"].isoformat(), "timeZone": "Asia/Tokyo"},
-        }
-        service.events().insert(calendarId=calendar_id, body=body).execute()
-        print(f"Updated: {ev['summary']}")
+        # 更新
+        for ev in to_update:
+            for ex in existing_map.get(ev["summary"], []):
+                try:
+                    ex_start = parse_naive_dt(ex["start"]["dateTime"])
+                except (KeyError, ValueError):
+                    continue
 
+                # 6時間以内の差のはずなのでそのまま update
+                body = {
+                    "summary": ev["summary"],
+                    "description": " ".join(ev["urls"]),
+                    "start": {"dateTime": ev["start"].isoformat(), "timeZone": "Asia/Tokyo"},
+                    "end": {"dateTime": ev["end"].isoformat(), "timeZone": "Asia/Tokyo"},
+                }
+                service.events().update(calendarId=calendar_id, eventId=ex["id"], body=body).execute()
+                print(f"Updated: {ev['summary']}")
+                break
     # 削除
     for ex in to_delete:
         service.events().delete(calendarId=calendar_id, eventId=ex["id"]).execute()
